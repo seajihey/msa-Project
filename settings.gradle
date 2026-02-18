@@ -1,0 +1,9 @@
+rootProject.name = 'msa_Projects'
+
+include 'gateway'
+include 'auth-service'
+include 'transaction-service'
+include 'account-service'
+include 'ledger-service'
+include 'query-service'
+include 'common'
