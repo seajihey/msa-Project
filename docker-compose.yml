@@ -1,5 +1,49 @@
 services:
-  postgres:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: msa-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-Xmx256m -Xms256m"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: msa-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_HEAP_OPTS: "-Xmx400m -Xms400m"
+      # [내일 수정 필요] 10.0.1.xxx 부분을 새로운 프라이빗 IP로 변경하세요
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://10.0.1.105:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: msa-kafka-ui
+    ports:
+      - "8090:8080"
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+
+  redis:
+    image: redis:latest
+    container_name: msa-redis
+    ports:
+      - "6379:6379"
+
+	postgres:
     image: postgres:16
     container_name: msa-postgres
     environment:
@@ -12,5 +56,55 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./infrastructure/postgres:/docker-entrypoint-initdb.d:ro
 
+  # --- 모니터링 섹션 ---
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: msa-node-exporter
+    ports:
+      - "9100:9100"
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter
+    container_name: msa-kafka-exporter
+    command: ["--kafka.server=kafka:9092"]
+    ports:
+      - "9308:9308"
+    depends_on:
+      - kafka
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: msa-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=3d'
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: msa-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_ROOT_URL=http://43.203.215.6/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  nginx-proxy:
+    image: nginx:latest
+    container_name: msa-nginx
+    ports:
+      - "80:80"  # 외부 80번 포트를 내부 80번으로 연결
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # 아까 만든 설정 파일 연결
+    depends_on:
+      - grafana
+    # - gateway-service (나중에 개발자 코드가 합쳐지면 주석 해제)
 volumes:
   pgdata:
